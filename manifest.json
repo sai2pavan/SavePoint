@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Savepoint - Pick up where you left off",
+  "version": "1.0",
+  "description": "Remembers your timestamp on YouTube videos, even with watch history off.",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content.js"]
+    }
+  ]
+}
