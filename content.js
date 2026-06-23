@@ -1,4 +1,4 @@
-console.log("Savepoint extension loaded on this page!");
+console.log("Savepoint: extension loaded");
 
 function getVideoId() {
   const url = new URL(window.location.href);
@@ -6,44 +6,39 @@ function getVideoId() {
 }
 
 const videoId = getVideoId();
-console.log("Video ID is:", videoId);
-
 const video = document.querySelector("video");
 
 if (video) {
-  console.log("Found the video element!", video);
-
+  // --- RESUME LOGIC ---
   chrome.storage.local.get([videoId], (result) => {
     const savedTime = result[videoId];
 
     if (savedTime) {
-      console.log("Found a saved timestamp:", savedTime, "- resuming there.");
-      video.currentTime = savedTime;
-    } else {
-      console.log("No saved timestamp for this video, starting fresh.");
+      const seekToSavedTime = () => {
+        // Skip ads: their duration is almost always far shorter than
+        // a real saved timestamp, so only seek once durations line up.
+        if (video.duration && savedTime < video.duration) {
+          console.log("Savepoint: resuming at", savedTime);
+          video.currentTime = savedTime;
+        }
+      };
+
+      if (video.readyState >= 1) {
+        seekToSavedTime();
+      }
+
+      // Fires every time YouTube loads new content into this <video> tag
+      // (ad finishing, real video starting, etc.)
+      video.addEventListener("loadedmetadata", seekToSavedTime);
     }
   });
 
+  // --- SAVE LOGIC ---
   setInterval(() => {
-    const currentTime = video.currentTime;
-    console.log("Current time:", currentTime);
-
-    chrome.storage.local.set({ [videoId]: currentTime }, () => {
+    chrome.storage.local.set({ [videoId]: video.currentTime }, () => {
       if (chrome.runtime.lastError) {
-        console.error("SET failed:", chrome.runtime.lastError);
-      } else {
-        console.log("SET succeeded for", videoId, currentTime);
-      }
-    });
-
-    chrome.storage.local.get(null, (everything) => {
-      if (chrome.runtime.lastError) {
-        console.error("GET failed:", chrome.runtime.lastError);
-      } else {
-        console.log("Everything in storage:", everything);
+        console.error("Savepoint: failed to save progress", chrome.runtime.lastError);
       }
     });
   }, 3000);
-} else {
-  console.log("No video element found yet.");
 }
