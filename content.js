@@ -9,9 +9,6 @@ function getVideoId() {
   return url.searchParams.get("v");
 }
 
-// The avatar image's src is unique per logged-in Google account, so we use
-// it to keep each account's saved timestamps separate and private from
-// other accounts using the same browser.
 function getAccountId() {
   const avatarImg = document.querySelector("#avatar-btn img");
   return avatarImg ? avatarImg.src : null;
@@ -32,15 +29,10 @@ function startTrackingVideo() {
   const videoId = getVideoId();
   const video = document.querySelector("video");
 
-  if (!videoId || !video) {
-    return;
-  }
+  if (!videoId || !video) return;
 
   const accountId = getAccountId();
-
   if (!accountId) {
-    // Avatar hasn't loaded yet - try again shortly rather than tracking
-    // under a missing/shared key.
     setTimeout(startTrackingVideo, 500);
     return;
   }
@@ -59,10 +51,7 @@ function startTrackingVideo() {
         }
       };
 
-      if (video.readyState >= 1) {
-        seekToSavedTime();
-      }
-
+      if (video.readyState >= 1) seekToSavedTime();
       video.addEventListener("loadedmetadata", seekToSavedTime);
       activeVideoElement = video;
       activeListener = seekToSavedTime;
@@ -71,6 +60,15 @@ function startTrackingVideo() {
 
   // --- SAVE LOGIC ---
   saveIntervalId = setInterval(() => {
+    // Don't save if the video is essentially finished (within 10 seconds of end)
+    // — treat it as done and remove it from storage instead.
+    if (video.duration && video.currentTime >= video.duration - 10) {
+      chrome.storage.local.remove(storageKey);
+      return;
+    }
+    // Don't save if currentTime is 0 (ad playing or video not started)
+    if (video.currentTime === 0) return;
+
     chrome.storage.local.set({ [storageKey]: video.currentTime }, () => {
       if (chrome.runtime.lastError) {
         console.error("Savepoint: failed to save progress", chrome.runtime.lastError);
@@ -84,11 +82,14 @@ window.addEventListener("yt-navigate-finish", startTrackingVideo);
 
 // --- THUMBNAIL INDICATOR LOGIC ---
 
+const INDICATOR_COLOR = "#126CE3";
+const INDICATOR_SIZE = "28px";
+// Mark thumbnails we've already processed so we don't add duplicate badges
+const PROCESSED_ATTR = "data-savepoint-processed";
+
 function extractVideoIdFromHref(href) {
   if (!href) return null;
   try {
-    // href is like "/watch?v=tavcHl_6wbs&pp=..."
-    // We prepend the origin to make it a full URL the URL parser can handle
     const url = new URL(href, window.location.origin);
     return url.searchParams.get("v");
   } catch (e) {
@@ -96,28 +97,82 @@ function extractVideoIdFromHref(href) {
   }
 }
 
-function scanThumbnails() {
-  const thumbnailLinks = document.querySelectorAll("a#thumbnail");
-  console.log("Savepoint: found", thumbnailLinks.length, "thumbnails on this page");
+function addIndicator(thumbnailLink) {
+  // Don't add a second badge if one already exists
+  if (thumbnailLink.querySelector("[data-savepoint-badge]")) return;
 
+  const badge = document.createElement("div");
+  badge.setAttribute("data-savepoint-badge", "true");
+  badge.style.cssText = `
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: ${INDICATOR_SIZE} ${INDICATOR_SIZE} 0 0;
+    border-color: ${INDICATOR_COLOR} transparent transparent transparent;
+    z-index: 10;
+    pointer-events: none;
+  `;
+  // The thumbnail link needs relative positioning so our badge sits on top of it correctly
+  thumbnailLink.style.position = "relative";
+  thumbnailLink.appendChild(badge);
+}
+
+function processThumbnails() {
+  const accountId = getAccountId();
+  if (!accountId) return; // Not logged in or avatar not loaded yet
+
+  const thumbnailLinks = document.querySelectorAll(`a#thumbnail:not([${PROCESSED_ATTR}])`);
+  if (thumbnailLinks.length === 0) return;
+
+  // Collect all video IDs and their storage keys in one pass
+  const entries = [];
   thumbnailLinks.forEach((link) => {
-    const href = link.getAttribute("href");
-    console.log("Savepoint: raw href →", href);
+    const videoId = extractVideoIdFromHref(link.getAttribute("href"));
+    if (!videoId) return;
 
-    // Log every attribute on this element so we can see what's actually there
-    console.log("Savepoint: all attributes →", 
-      Array.from(link.attributes).map(a => `${a.name}="${a.value}"`).join(", ")
-    );
+    // Mark as processed immediately so future scans skip it
+    link.setAttribute(PROCESSED_ATTR, "true");
+    entries.push({ link, storageKey: `${accountId}__${videoId}` });
+  });
 
-    // Also log the full outerHTML trimmed, to see the real structure
-    console.log("Savepoint: outerHTML →", link.outerHTML.slice(0, 300));
+  if (entries.length === 0) return;
 
-    const videoId = extractVideoIdFromHref(href);
-    if (videoId) {
-      console.log("Savepoint: thumbnail video ID →", videoId);
-    }
+  // Check storage for all these videos in one single batch call
+  const keys = entries.map((e) => e.storageKey);
+  chrome.storage.local.get(keys, (result) => {
+    entries.forEach(({ link, storageKey }) => {
+      if (result[storageKey]) {
+        // This video has saved in-progress time — add the blue badge
+        addIndicator(link);
+      }
+    });
   });
 }
 
-// Run after a short delay to let YouTube's dynamic content populate
-setTimeout(scanThumbnails, 5000);
+// MutationObserver watches for new thumbnails being added to the page
+// (e.g. as you scroll, or when YouTube loads new content dynamically)
+// and processes them as soon as they appear.
+const observer = new MutationObserver(() => {
+  processThumbnails();
+});
+
+observer.observe(document.body, {
+  childList: true,  // Watch for elements being added/removed
+  subtree: true     // Watch the entire page tree, not just direct children
+});
+
+// Also run once after a short delay for thumbnails already on the page at load time
+setTimeout(processThumbnails, 3000);
+
+// Re-scan on YouTube's internal navigation events
+window.addEventListener("yt-navigate-finish", () => {
+  // Clear all processed stamps so thumbnails get re-checked
+  // against storage which may have updated since last scan.
+  document.querySelectorAll(`a#thumbnail[${PROCESSED_ATTR}]`).forEach((el) => {
+    el.removeAttribute(PROCESSED_ATTR);
+  });
+  setTimeout(processThumbnails, 2000);
+});
