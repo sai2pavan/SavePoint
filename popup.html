@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Savepoint</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 280px;
+      background: #0F0F0F;
+      color: #FFFFFF;
+      font-family: "Roboto", -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      user-select: none;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 16px 14px;
+      border-bottom: 1px solid #2A2A2A;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+    }
+
+    /* The red dot — our signature element, pulses when active */
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #FF0000;
+      flex-shrink: 0;
+    }
+
+    .dot.active {
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    .status-badge {
+      font-size: 11px;
+      font-weight: 500;
+      color: #AAAAAA;
+      background: #1F1F1F;
+      padding: 3px 8px;
+      border-radius: 20px;
+      letter-spacing: 0.3px;
+    }
+
+    .status-badge.active {
+      color: #4ADE80;
+    }
+
+    /* ── Count section ── */
+    .count-section {
+      padding: 18px 16px;
+      border-bottom: 1px solid #2A2A2A;
+    }
+
+    .count-number {
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1;
+      color: #FFFFFF;
+      letter-spacing: -1px;
+    }
+
+    .count-label {
+      font-size: 12px;
+      color: #AAAAAA;
+      margin-top: 4px;
+      letter-spacing: 0.1px;
+    }
+
+    /* ── Action section ── */
+    .action-section {
+      padding: 12px 16px 14px;
+    }
+
+    .clear-btn {
+      width: 100%;
+      padding: 9px 0;
+      background: #1F1F1F;
+      color: #AAAAAA;
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      letter-spacing: 0.1px;
+    }
+
+    .clear-btn:hover {
+      background: #2A2A2A;
+      color: #FFFFFF;
+      border-color: #3A3A3A;
+    }
+
+    .clear-btn:active {
+      background: #FF0000;
+      color: #FFFFFF;
+      border-color: #FF0000;
+    }
+
+    .clear-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* ── Confirmation state ── */
+    .confirm-row {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .confirm-row.visible {
+      display: flex;
+    }
+
+    .confirm-text {
+      font-size: 12px;
+      color: #AAAAAA;
+      text-align: center;
+    }
+
+    .confirm-buttons {
+      display: flex;
+      gap: 8px;
+    }
+
+    .confirm-yes {
+      flex: 1;
+      padding: 8px 0;
+      background: #FF0000;
+      color: #FFFFFF;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .confirm-yes:hover {
+      background: #CC0000;
+    }
+
+    .confirm-no {
+      flex: 1;
+      padding: 8px 0;
+      background: #1F1F1F;
+      color: #AAAAAA;
+      border: 1px solid #2A2A2A;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .confirm-no:hover {
+      background: #2A2A2A;
+      color: #FFFFFF;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">
+      <div class="dot active" id="dot"></div>
+      Savepoint
+    </div>
+    <span class="status-badge active" id="statusBadge">Active</span>
+  </div>
+
+  <div class="count-section">
+    <div class="count-number" id="countNumber">—</div>
+    <div class="count-label" id="countLabel">loading...</div>
+  </div>
+
+  <div class="action-section">
+    <button class="clear-btn" id="clearBtn">Clear all progress</button>
+    <div class="confirm-row" id="confirmRow">
+      <span class="confirm-text">This will delete all saved timestamps. Sure?</span>
+      <div class="confirm-buttons">
+        <button class="confirm-yes" id="confirmYes">Yes, clear all</button>
+        <button class="confirm-no" id="confirmNo">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

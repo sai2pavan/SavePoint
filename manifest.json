@@ -3,7 +3,22 @@
   "name": "Savepoint - Pick up where you left off",
   "version": "1.0",
   "description": "Remembers your timestamp on YouTube videos, even with watch history off.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Savepoint",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],
