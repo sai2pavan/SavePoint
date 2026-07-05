@@ -1,4 +1,4 @@
-# Savepoint
+# 🔖 Savepoint
 
 **Never lose your place in a YouTube video again.**
 
@@ -36,7 +36,7 @@ Savepoint fixes that. It runs silently in the background, saving your progress e
 2. Open Chrome and go to `chrome://extensions`
 3. Enable **Developer mode** (top-right toggle)
 4. Click **Load unpacked**
-5. Select the `yt-resume` folder
+5. Select the `Savepoint` folder
 6. Navigate to any YouTube video — Savepoint is now active
 
 ---
