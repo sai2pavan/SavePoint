@@ -2,9 +2,14 @@ console.log("Savepoint: extension loaded");
 
 let saveIntervalId = null;
 let accountIdRetries = 0;
-const MAX_ACCOUNT_RETRIES = 10; // 5 seconds total (10 x 500ms)
+const MAX_ACCOUNT_RETRIES = 10;
 let activeVideoElement = null;
 let activeListener = null;
+
+const INDICATOR_COLOR = "#FF0000";
+const INDICATOR_SIZE  = "28px";
+const PROCESSED_ATTR  = "data-savepoint-processed";
+const MIN_RESUME_THRESHOLD = 5;
 
 function getVideoId() {
   const url = new URL(window.location.href);
@@ -13,7 +18,13 @@ function getVideoId() {
 
 function getAccountId() {
   const avatarImg = document.querySelector("#avatar-btn img");
-  return avatarImg ? avatarImg.src : null;
+  if (!avatarImg) return null;
+
+  // Extract just the stable ID from the avatar URL, ignoring CDN domain
+  // and size parameters which vary between page loads.
+  // e.g. "AIdro_lPLRfn..." from "yt3.ggpht.com/ytc/AIdro_lPLRfn...=s88-c-k-..."
+  const match = avatarImg.src.match(/\/ytc\/([\w-]+)/);
+  return match ? match[1] : avatarImg.src;
 }
 
 function startTrackingVideo() {
@@ -44,9 +55,7 @@ function startTrackingVideo() {
     return;
   }
 
-  // Reset retry counter once we successfully find an account
   accountIdRetries = 0;
-
   const storageKey = `${accountId}__${videoId}`;
 
   // --- RESUME LOGIC ---
@@ -58,12 +67,9 @@ function startTrackingVideo() {
         if (!video.duration) return;
 
         if (savedTime < video.duration) {
-          // Normal case — seek to saved position
           console.log("Savepoint: resuming at", savedTime);
           video.currentTime = savedTime;
         } else {
-          // savedTime exceeds this version's duration (re-upload, region cut, etc.)
-          // Clamp to near the end so "finished" detection cleans it up naturally
           const finishThreshold = Math.min(10, video.duration * 0.05);
           console.log("Savepoint: saved time exceeds duration, clamping to near end");
           video.currentTime = video.duration - finishThreshold;
@@ -79,15 +85,11 @@ function startTrackingVideo() {
 
   // --- SAVE LOGIC ---
   saveIntervalId = setInterval(() => {
-    // Consider a video "finished" when within the last 10 seconds
-    // OR the last 5% of its duration — whichever is smaller.
-    // This prevents short videos from being marked done too early.
     const finishThreshold = Math.min(10, video.duration * 0.05);
     if (video.duration && video.currentTime >= video.duration - finishThreshold) {
       chrome.storage.local.remove(storageKey);
       return;
     }
-    // Don't save if currentTime is 0 (ad playing or video not started)
     if (video.currentTime === 0) return;
 
     chrome.storage.local.set({ [storageKey]: video.currentTime }, () => {
@@ -103,10 +105,10 @@ window.addEventListener("yt-navigate-finish", startTrackingVideo);
 
 // --- THUMBNAIL INDICATOR LOGIC ---
 
-const INDICATOR_COLOR = "#FF0000";
-const INDICATOR_SIZE  = "28px";
-const PROCESSED_ATTR  = "data-savepoint-processed";
-const MIN_RESUME_THRESHOLD = 5; // seconds — don't resume or badge if barely started
+// YouTube uses two different rendering systems for thumbnails:
+// 1. Old system: a#thumbnail inside ytd-thumbnail (search, subscriptions, homepage)
+// 2. New "lockup" system: a.ytLockupViewModelContentImage (channel pages, sidebar)
+// We handle both so indicators appear everywhere.
 
 function extractVideoIdFromHref(href) {
   if (!href) return null;
@@ -118,14 +120,9 @@ function extractVideoIdFromHref(href) {
   }
 }
 
-function addIndicator(thumbnailLink) {
-  // Don't add a second badge if one already exists
-  if (thumbnailLink.querySelector("[data-savepoint-badge]")) return;
+function addIndicator(container) {
+  if (container.querySelector("[data-savepoint-badge]")) return;
 
-  // Attach to ytd-thumbnail (the parent), not the a#thumbnail link itself.
-  // Setting position:relative on the link disrupts YouTube's flex layout;
-  // the parent container is the safe anchor for our absolute-positioned badge.
-  const container = thumbnailLink.closest("ytd-thumbnail") || thumbnailLink;
   container.style.position = "relative";
   container.style.overflow = "hidden";
 
@@ -148,80 +145,67 @@ function addIndicator(thumbnailLink) {
 
 function processThumbnails() {
   const accountId = getAccountId();
-  if (!accountId) return; // Not logged in or avatar not loaded yet
+  if (!accountId) return;
 
-  const thumbnailLinks = document.querySelectorAll(`a#thumbnail:not([${PROCESSED_ATTR}])`);
-  if (thumbnailLinks.length === 0) return;
+  const candidates = [];
 
-  // Collect all video IDs and their storage keys in one pass
-  const entries = [];
-  thumbnailLinks.forEach((link) => {
+  // System 1: old renderer — a#thumbnail (search, subscriptions, feed)
+  document.querySelectorAll(`a#thumbnail:not([${PROCESSED_ATTR}])`).forEach((link) => {
     const videoId = extractVideoIdFromHref(link.getAttribute("href"));
     if (!videoId) return;
-
-    // Mark as processed immediately so future scans skip it
     link.setAttribute(PROCESSED_ATTR, "true");
-    entries.push({ link, storageKey: `${accountId}__${videoId}` });
+    const container = link.closest("ytd-thumbnail") || link;
+    candidates.push({ container, storageKey: `${accountId}__${videoId}` });
   });
 
-  if (entries.length === 0) return;
+  // System 2: new lockup renderer — a.ytLockupViewModelContentImage (channel pages, sidebar)
+  document.querySelectorAll(`a.ytLockupViewModelContentImage:not([${PROCESSED_ATTR}])`).forEach((link) => {
+    const videoId = extractVideoIdFromHref(link.getAttribute("href"));
+    if (!videoId) return;
+    link.setAttribute(PROCESSED_ATTR, "true");
+    const container = link.closest("yt-thumbnail-view-model") || link;
+    candidates.push({ container, storageKey: `${accountId}__${videoId}` });
+  });
 
-  // Check storage for all these videos in one single batch call
-  const keys = entries.map((e) => e.storageKey);
+  if (candidates.length === 0) return;
+
+  const keys = candidates.map((c) => c.storageKey);
   chrome.storage.local.get(keys, (result) => {
-    entries.forEach(({ link, storageKey }) => {
+    candidates.forEach(({ container, storageKey }) => {
       const savedTime = result[storageKey];
-      // Only show badge if savedTime is above the same threshold
-      // used for resuming — badge should only promise what we'll deliver
       if (savedTime && savedTime > MIN_RESUME_THRESHOLD) {
-        addIndicator(link);
+        addIndicator(container);
       }
     });
   });
 }
 
 // --- STORAGE CHANGE LISTENER ---
-// When the popup clears progress, storage changes but the content script
-// has no idea. This listener detects removals and strips badges immediately,
-// so the UI stays in sync without needing a page reload.
 chrome.storage.onChanged.addListener((changes) => {
   const anyRemoved = Object.values(changes).some(
     (change) => change.oldValue !== undefined && change.newValue === undefined
   );
 
   if (anyRemoved) {
-    // Remove all badges currently visible on the page
-    document.querySelectorAll("[data-savepoint-badge]").forEach((badge) => {
-      badge.remove();
-    });
-
-    // Also clear processed stamps so thumbnails get re-checked
-    // if new progress is saved later
-    document.querySelectorAll(`[${PROCESSED_ATTR}]`).forEach((el) => {
-      el.removeAttribute(PROCESSED_ATTR);
-    });
+    document.querySelectorAll("[data-savepoint-badge]").forEach((badge) => badge.remove());
+    document.querySelectorAll(`[${PROCESSED_ATTR}]`).forEach((el) => el.removeAttribute(PROCESSED_ATTR));
   }
 });
+
 // MutationObserver watches for new thumbnails being added to the page
-// (e.g. as you scroll, or when YouTube loads new content dynamically)
-// and processes them as soon as they appear.
 const observer = new MutationObserver(() => {
   processThumbnails();
 });
 
 observer.observe(document.body, {
-  childList: true,  // Watch for elements being added/removed
-  subtree: true     // Watch the entire page tree, not just direct children
+  childList: true,
+  subtree: true
 });
 
-// Also run once after a short delay for thumbnails already on the page at load time
 setTimeout(processThumbnails, 3000);
 
-// Re-scan on YouTube's internal navigation events
 window.addEventListener("yt-navigate-finish", () => {
-  // Clear all processed stamps so thumbnails get re-checked
-  // against storage which may have updated since last scan.
-  document.querySelectorAll(`a#thumbnail[${PROCESSED_ATTR}]`).forEach((el) => {
+  document.querySelectorAll(`a#thumbnail[${PROCESSED_ATTR}], a.ytLockupViewModelContentImage[${PROCESSED_ATTR}]`).forEach((el) => {
     el.removeAttribute(PROCESSED_ATTR);
   });
   setTimeout(processThumbnails, 2000);
