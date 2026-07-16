@@ -1,27 +1,27 @@
-const countNumber = document.getElementById("countNumber");
-const countLabel  = document.getElementById("countLabel");
-const clearBtn    = document.getElementById("clearBtn");
-const confirmRow  = document.getElementById("confirmRow");
-const confirmYes  = document.getElementById("confirmYes");
-const confirmNo   = document.getElementById("confirmNo");
+const countNumber  = document.getElementById("countNumber");
+const countLabel   = document.getElementById("countLabel");
+const clearBtn     = document.getElementById("clearBtn");
+const confirmRow   = document.getElementById("confirmRow");
+const confirmYes   = document.getElementById("confirmYes");
+const confirmNo    = document.getElementById("confirmNo");
+const badgeToggle  = document.getElementById("badgeToggle");
+
+const BADGE_TOGGLE_KEY = "savepoint_badges_enabled";
 
 // --- Get the current account ID from the active YouTube tab ---
 function getAccountIdFromTab() {
   return new Promise((resolve) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs[0];
-
       if (!tab || !tab.url || !tab.url.includes("youtube.com")) {
         resolve(null);
         return;
       }
-
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
           const avatarImg = document.querySelector("#avatar-btn img");
           if (!avatarImg) return null;
-          // Extract just the stable ID, ignoring CDN domain and size params
           const match = avatarImg.src.match(/\/ytc\/([\w-]+)/);
           return match ? match[1] : avatarImg.src;
         }
@@ -36,6 +36,19 @@ function getAccountIdFromTab() {
   });
 }
 
+// --- Load toggle state from storage ---
+chrome.storage.local.get([BADGE_TOGGLE_KEY], (result) => {
+  // Default to true (badges on) if never set
+  const enabled = result[BADGE_TOGGLE_KEY] !== false;
+  badgeToggle.checked = enabled;
+});
+
+// --- Save toggle state and notify content script when changed ---
+badgeToggle.addEventListener("change", () => {
+  const enabled = badgeToggle.checked;
+  chrome.storage.local.set({ [BADGE_TOGGLE_KEY]: enabled });
+});
+
 // --- Load count for the current account only ---
 async function loadCount() {
   const accountId = await getAccountIdFromTab();
@@ -49,7 +62,6 @@ async function loadCount() {
 
   chrome.storage.local.get(null, (everything) => {
     const MIN_RESUME_THRESHOLD = 5;
-
     const inProgress = Object.entries(everything).filter(([key, value]) => {
       if (!key.includes("__")) return false;
       if (typeof value !== "number" || value <= MIN_RESUME_THRESHOLD) return false;
@@ -69,7 +81,7 @@ async function loadCount() {
 
 loadCount();
 
-// --- Clear all: show confirmation first, then act ---
+// --- Clear all ---
 clearBtn.addEventListener("click", () => {
   clearBtn.style.display = "none";
   confirmRow.classList.add("visible");

@@ -6,10 +6,19 @@ const MAX_ACCOUNT_RETRIES = 10;
 let activeVideoElement = null;
 let activeListener = null;
 
-const INDICATOR_COLOR = "#FF0000";
-const INDICATOR_SIZE  = "28px";
-const PROCESSED_ATTR  = "data-savepoint-processed";
+const INDICATOR_COLOR    = "#FF0000";
+const INDICATOR_SIZE     = "28px";
+const PROCESSED_ATTR     = "data-savepoint-processed";
 const MIN_RESUME_THRESHOLD = 5;
+const BADGE_TOGGLE_KEY   = "savepoint_badges_enabled";
+
+// Whether badges are currently enabled — read from storage on load
+let badgesEnabled = true;
+
+// Read the toggle state from storage immediately on load
+chrome.storage.local.get([BADGE_TOGGLE_KEY], (result) => {
+  badgesEnabled = result[BADGE_TOGGLE_KEY] !== false;
+});
 
 function getVideoId() {
   const url = new URL(window.location.href);
@@ -19,10 +28,6 @@ function getVideoId() {
 function getAccountId() {
   const avatarImg = document.querySelector("#avatar-btn img");
   if (!avatarImg) return null;
-
-  // Extract just the stable ID from the avatar URL, ignoring CDN domain
-  // and size parameters which vary between page loads.
-  // e.g. "AIdro_lPLRfn..." from "yt3.ggpht.com/ytc/AIdro_lPLRfn...=s88-c-k-..."
   const match = avatarImg.src.match(/\/ytc\/([\w-]+)/);
   return match ? match[1] : avatarImg.src;
 }
@@ -105,11 +110,6 @@ window.addEventListener("yt-navigate-finish", startTrackingVideo);
 
 // --- THUMBNAIL INDICATOR LOGIC ---
 
-// YouTube uses two different rendering systems for thumbnails:
-// 1. Old system: a#thumbnail inside ytd-thumbnail (search, subscriptions, homepage)
-// 2. New "lockup" system: a.ytLockupViewModelContentImage (channel pages, sidebar)
-// We handle both so indicators appear everywhere.
-
 function extractVideoIdFromHref(href) {
   if (!href) return null;
   try {
@@ -143,7 +143,15 @@ function addIndicator(container) {
   container.appendChild(badge);
 }
 
+function removeAllBadges() {
+  document.querySelectorAll("[data-savepoint-badge]").forEach((badge) => badge.remove());
+  document.querySelectorAll(`[${PROCESSED_ATTR}]`).forEach((el) => el.removeAttribute(PROCESSED_ATTR));
+}
+
 function processThumbnails() {
+  // Skip if badges are disabled
+  if (!badgesEnabled) return;
+
   const accountId = getAccountId();
   if (!accountId) return;
 
@@ -181,18 +189,35 @@ function processThumbnails() {
 }
 
 // --- STORAGE CHANGE LISTENER ---
+// Handles two cases:
+// 1. Progress cleared from popup → remove badges
+// 2. Badge toggle changed from popup → show or hide badges
 chrome.storage.onChanged.addListener((changes) => {
+  // Handle badge toggle change
+  if (changes[BADGE_TOGGLE_KEY] !== undefined) {
+    badgesEnabled = changes[BADGE_TOGGLE_KEY].newValue !== false;
+
+    if (!badgesEnabled) {
+      // Toggle turned off — remove all badges immediately
+      removeAllBadges();
+    } else {
+      // Toggle turned on — re-scan page to show badges
+      setTimeout(processThumbnails, 100);
+    }
+    return;
+  }
+
+  // Handle progress cleared
   const anyRemoved = Object.values(changes).some(
     (change) => change.oldValue !== undefined && change.newValue === undefined
   );
 
   if (anyRemoved) {
-    document.querySelectorAll("[data-savepoint-badge]").forEach((badge) => badge.remove());
-    document.querySelectorAll(`[${PROCESSED_ATTR}]`).forEach((el) => el.removeAttribute(PROCESSED_ATTR));
+    removeAllBadges();
   }
 });
 
-// MutationObserver watches for new thumbnails being added to the page
+// MutationObserver watches for new thumbnails
 const observer = new MutationObserver(() => {
   processThumbnails();
 });
