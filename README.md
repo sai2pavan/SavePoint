@@ -1,4 +1,4 @@
-# Savepoint
+# SavePoint
 
 <p align="center">
   <img src="icon128.png" width="96" alt="Savepoint icon"/>
